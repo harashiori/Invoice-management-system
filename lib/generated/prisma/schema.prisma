@@ -1,0 +1,324 @@
+// Prisma Schema for Invoice Management System
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ユーザー管理
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String? // パスワードハッシュ
+  role      String // '管理者' | '経理担当者' | '営業担当者' | '閲覧者'
+  status    String   @default("active") // 'active' | 'inactive'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  notifications Notification[]
+
+  @@map("users")
+}
+
+// 取引先マスタ
+model Supplier {
+  id                 String   @id @default(cuid())
+  name               String
+  code               String   @unique
+  registrationNumber String // インボイス登録番号
+  address            String
+  phone              String
+  email              String
+  contact            String
+  status             String   @default("active") // 'active' | 'inactive'
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  projects Project[]
+  invoices Invoice[]
+
+  @@map("suppliers")
+}
+
+// 案件マスタ
+model Project {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  name         String
+  description  String?
+  clientId     String
+  status       String    @default("active") // 'active' | 'completed' | 'suspended' | 'cancelled'
+  startDate    DateTime
+  endDate      DateTime?
+  budget       Float?
+  actualAmount Float     @default(0)
+  manager      String?
+  members      String[] // JSON array
+  tags         String[] // JSON array
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relations
+  client   Supplier  @relation(fields: [clientId], references: [id])
+  invoices Invoice[]
+
+  @@map("projects")
+}
+
+// 請求書
+model Invoice {
+  id            String  @id @default(cuid())
+  invoiceNumber String?
+
+  // 基本情報
+  issueDate              DateTime
+  dueDate                DateTime
+  transactionDate        DateTime?
+  transactionPeriodStart DateTime?
+  transactionPeriodEnd   DateTime?
+  currency               String?   @default("JPY")
+  subject                String?
+  purchaseOrderNumber    String?
+  projectName            String?
+  projectId              String?
+  projectCode            String?
+
+  // 取引先情報
+  supplier                   String
+  supplierId                 String
+  supplierRegistrationNumber String?
+  supplierAddress            String?
+  supplierPhone              String?
+  supplierEmail              String?
+  supplierContactPerson      String?
+
+  // 請求先情報
+  billingTo              String?
+  billingToDepartment    String?
+  billingToContactPerson String?
+
+  // 金額・税情報
+  subtotal          Float?
+  taxAmount         Float
+  amount            Float
+  taxExcludedAmount Float
+  taxExemptAmount   Float?
+  nonTaxableAmount  Float?
+
+  // 支払条件・振込先
+  paymentDueDate    DateTime?
+  paymentTerms      String?
+  bankName          String?
+  bankBranchName    String?
+  bankAccountType   String?
+  bankAccountNumber String?
+  bankAccountHolder String?
+  transferFeePayer  String?
+
+  // 照合用キー
+  normalizedSupplierName String?
+  matchingProjectName    String?
+  matchingContactPerson  String?
+
+  // 電帳法・監査用メタデータ
+  receiptMethod      String?
+  receiptDateTime    DateTime?
+  registeredBy       String?
+  receivedFromEmail  String?
+  fileHash           String?
+  storagePath        String?
+  ocrConfidenceScore Float?
+  documentVersion    Int?      @default(1)
+
+  // PDFファイル情報
+  filePath String?
+  fileName String?
+  fileSize Int?
+
+  // ステータス
+  project       String
+  status        String @default("未処理") // '未処理' | '照合済' | '差異あり' | '支払済' | '消込済'
+  ocrConfidence Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  supplierRef   Supplier?      @relation(fields: [supplierId], references: [id])
+  projectRef    Project?       @relation(fields: [projectId], references: [id])
+  items         InvoiceItem[]
+  taxBreakdowns TaxBreakdown[]
+  payments      Payment[]
+
+  @@map("invoices")
+}
+
+// 請求書明細
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  name        String
+  description String?
+  quantity    Float
+  unit        String?
+  unitPrice   Float
+  amount      Float
+  taxRate     Float?
+  taxAmount   Float?
+  remarks     String?
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+// 税率別内訳
+model TaxBreakdown {
+  id            String @id @default(cuid())
+  invoiceId     String
+  taxRate       Float
+  taxableAmount Float
+  taxAmount     Float
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("tax_breakdowns")
+}
+
+// 支払管理
+model Payment {
+  id                   String    @id @default(cuid())
+  invoiceId            String
+  supplier             String
+  project              String
+  amount               Float
+  dueDate              DateTime
+  status               String    @default("未処理") // '未処理' | '照合済' | '差異あり' | '支払済' | '消込済'
+  paidAt               DateTime?
+  paymentMethod        String? // '銀行振込' | 'クレジットカード' | '現金' | 'その他'
+  bankTransactionId    String?
+  reconciliationStatus String? // '未消込' | '消込中' | '消込済' | '差異あり'
+  reconciliationNote   String?
+  reconciliationDate   DateTime?
+  actualAmount         Float?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("payments")
+}
+
+// 通知
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String // 'invoice_received' | 'payment_due' | 'payment_completed' | 'approval_required' | 'project_updated' | 'system'
+  title       String
+  message     String
+  relatedId   String?
+  relatedType String? // 'invoice' | 'payment' | 'project' | 'supplier'
+  priority    String   @default("medium") // 'low' | 'medium' | 'high'
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// 月次レポート
+model MonthlyReport {
+  id                String   @id @default(cuid())
+  period            String // 'YYYY-MM'
+  totalInvoices     Int
+  totalAmount       Float
+  statusBreakdown   Json // Array of {status, count, amount}
+  supplierBreakdown Json // Array of {supplierId, supplierName, count, amount}
+  generatedAt       DateTime @default(now())
+  filePath          String?
+
+  @@map("monthly_reports")
+}
+
+// レポートスケジュール
+model ReportSchedule {
+  id         String    @id @default(cuid())
+  name       String
+  frequency  String // 'monthly' | 'weekly' | 'daily'
+  dayOfMonth Int? // 1-31
+  recipients String[] // Email addresses
+  enabled    Boolean   @default(true)
+  lastSentAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("report_schedules")
+}
+
+// システム設定
+model Settings {
+  id String @id @default("default")
+
+  // 会社情報
+  companyName         String
+  companyRegistration String
+  companyAddress      String
+  companyPhone        String
+  companyEmail        String
+  fiscalYearStart     Int    @default(4)
+
+  // 請求書設定
+  autoOcr             Boolean @default(true)
+  confidenceThreshold Float   @default(85)
+  approvalRequired    Boolean @default(true)
+  approvalThreshold   Float   @default(100000)
+  invoicePrefix       String  @default("INV-")
+  invoiceFormat       String  @default("年-連番")
+  invoiceDigits       Int     @default(3)
+
+  // 通知設定
+  paymentDueNotification  Boolean @default(true)
+  paymentDueDays          Int     @default(7)
+  newInvoiceNotification  Boolean @default(true)
+  approvalNotification    Boolean @default(true)
+  ocrCompleteNotification Boolean @default(false)
+  emailNotifications      Boolean @default(true)
+  notificationEmail       String?
+
+  // セキュリティ設定
+  twoFactor         Boolean @default(false)
+  sessionTimeout    Int     @default(30)
+  ipRestriction     Boolean @default(false)
+  minPasswordLength Int     @default(8)
+  requireUppercase  Boolean @default(true)
+  requireNumbers    Boolean @default(true)
+  requireSymbols    Boolean @default(false)
+  passwordExpiry    Int     @default(90)
+  auditLog          Boolean @default(true)
+
+  // ストレージ設定
+  timestamp          Boolean @default(true)
+  immutable          Boolean @default(true)
+  searchRequirements Boolean @default(true)
+  retentionPeriod    String  @default("7")
+  autoArchive        Boolean @default(false)
+  autoBackup         Boolean @default(true)
+  backupFrequency    String  @default("毎日")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
